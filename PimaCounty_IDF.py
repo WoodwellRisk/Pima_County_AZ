@@ -1,6 +1,11 @@
 import numpy as np
 import rasterio
-from haversine import haversine, Unit
+from haversine import haversine, haversine_vector, Unit
+from scipy.optimize import minimize, show_options
+import xarray as xr
+from scipy.stats import genextreme
+import matplotlib.pyplot as plt
+
 
 
 def EPC_grid():
@@ -34,50 +39,90 @@ def calc_disagg_factors():
 
 
 
-def gev_nll(data):
-    # https://www.mas.ncl.ac.uk/~nlf8/teaching/mas8391/background/chapter2.pdf page 22
-    loc = 0 # initialize location parameter, mu
-    scale = 0 # initialize scale parameter, sigma
-    shape = 0 # initialize shape parameter, xi
+def gev_nll(x, data):
+    '''
+    Log-likehood of GEV distribution
+    '''
+    mu = x[0] #location
+    sigma = x[1] #scale
+    xi = x[2] #shape
+    # Log-likehood equation here: https://www.mas.ncl.ac.uk/~nlf8/teaching/mas8391/background/chapter2.pdf page 22
     n = len(data) # number of sample values
-    mean = np.mean(data) # mean of sample
-    std = np.std(data) # standard deviation of sample
-    par1 = n*np.log(std) # first part of equation
-    par2 = (1 + (1/shape)) * np.sum(np.log(1 + shape * ((data - loc) / scale))) # second part of equation
-    par3 = np.sum(np.power(1 + shape * ((data - loc) / scale),(-1/shape))) # third part of equation
+    m = 1 + (xi * (data - mu) / sigma) # define m
+    if np.min(m) < 0.00001: # if minimum of m is close to zero or negative, return 1000000
+        return 1000000
 
-    return - par1 - par2 - par3 # return negative log-likelihood
+    if sigma < 0.00001: # if scale is close to zero or negative, return 1000000
+       return 1000000
+
+    if (xi==0):
+        loglik = -n*np.log(sigma) - np.sum((data-mu)/sigma) - np.sum(np.exp(-((data-mu)/sigma)))
+    else:
+        loglik = -n*np.log(sigma) - (1/xi+1) * np.sum(np.log(m)) - np.sum(m**(-1/xi)) # third part of equation
+
+    return -(loglik) # return log-likelihood
 
 
-def calc_weights(radius):
-    # take in station coordinates
-    # create matrix of the Haversine distance in miles between all stations
-    haversine(pp, other_stations, unit=Unit.MILES)
+def calc_weights(data, radius):
+    # take in grid cell coordinates and convert to list of tuples
+    coords = list(zip(data['lat'], data['lon']))
+
+    # create matrix of the Haversine distance in miles between all grid cells
+    hav_dist = haversine_vector(coords, coords, unit=Unit.MILES, comb=True)
 
     # apply triweight kernel function to weights
-    dist_matrix = (np.power(radius,2) - np.power(dist_matrix,2)) / np.power(radius,2)
+    kern_dist = (np.power(radius,2) - np.power(hav_dist,2)) / np.power(radius,2)
 
     # set all negative kernel values to zero
-    dist_matrix[dist_matrix < 0] = 0
+    kern_dist[kern_dist < 0] = 0
 
-    # normalize weights for each prediction point
-    x_norm = x/np.sum(x)
+    # normalize weights for each prediction point (grid cell) across rows; normalize rows of a matrix
+    row_sums = kern_dist.sum(axis=1)
+    kern_dist_norm = kern_dist / row_sums[:, np.newaxis]
 
-    return
+    return kern_dist_norm
 
-def regional_gmle():
+def regional_gmle(data):
     # set radius (miles) for each prediction point
     max_dist = 10
 
-    # calculate weights distance between each station in miles based on radius
-    calc_weights(max_dist)
+    # create pandas dataframe with index for each pixel and lat, lon
+    coords_df = data.pr[0,:,:].to_dataframe().reset_index()[['lat', 'lon']]
 
-    # maximize weighted negative log likelihood to calculate the GEV parameters for each prediction point, same parameters are used for all log likelihood values
+    # calculate weights distance between each grid cell in miles based on radius
+    pixel_weights = calc_weights(coords_df, max_dist)
 
+    # go across rows to match up with dataframe of coordinates
 
+    test = data.pr[:,0,0].to_numpy()
+    test = np.sort(test)[-50:]
 
+    # minimize weighted log likelihood to calculate the GEV parameters for each prediction point, same parameters are used for all log likelihood values
+    loc_initial = np.mean(test) # initialize location parameter, mu
+    scale_initial = np.std(test) # initialize scale parameter, sigma
+    shape_initial = 0.1 # initialize shape parameter, xi
+    x0 = [loc_initial, scale_initial, shape_initial] # initial vector of parameters
+    res = minimize(fun=gev_nll, x0=x0, args=test, method='Nelder-Mead')
+    print(res)
+
+    shape, loc, scale = genextreme.fit(test)
+    print(loc, scale, shape)
+
+    # x = np.linspace(genextreme.ppf(0.01, c=2.420e-01, loc=1.843e-18, scale=2.456e-18), genextreme.ppf(0.99, c=2.420e-01, loc=1.843e-18, scale=2.456e-18), 100)
+    # fig, ax = plt.subplots(1, 1)
+    # ax.plot(x, genextreme.pdf(x, c=2.420e-01, loc=1.843e-18, scale=2.456e-18), 'r-', lw=5, alpha=0.6, label='genextreme pdf')
+
+    # plt.show()
     return
 
 
+# constrain shape parameter with beta distribution
+# use quantile delta method (how does this compare to delta method)
+# quasistationary or nonstationary method?
 
 ##############################
+
+data = xr.open_dataset('clipped.nc', engine='netcdf4')
+# print(data)
+
+regional_gmle(data)
