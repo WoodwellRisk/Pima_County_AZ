@@ -2,10 +2,11 @@ import numpy as np
 import rasterio
 from haversine import haversine, haversine_vector, Unit
 from scipy.optimize import minimize, show_options
+from scipy.special import gamma
 import xarray as xr
 from scipy.stats import genextreme
 import matplotlib.pyplot as plt
-
+import glob2
 
 
 def EPC_grid():
@@ -39,7 +40,7 @@ def calc_disagg_factors():
 
 
 
-def gev_nll(x, data):
+def gev_nll(data, x):
     '''
     Log-likehood of GEV distribution
     '''
@@ -62,6 +63,13 @@ def gev_nll(x, data):
 
     return -(loglik) # return log-likelihood
 
+def weighted_gev_nll(x, data, weights):
+    xi = x[2] #shape
+    q = 5
+    beta = (gamma(q+q) * (0.5 + xi)**(q-1) * (0.5 - xi)**(q-1)) / (gamma(q)*gamma(q)) # calculate beta weight for shape parameter
+    print(np.log(beta))
+    nll_grid = np.apply_along_axis(gev_nll, 0, data, x) # multiply the log-likelihood by the weights
+    return np.sum(nll_grid*weights) - beta
 
 def calc_weights(data, radius):
     # take in grid cell coordinates and convert to list of tuples
@@ -87,26 +95,33 @@ def regional_gmle(data):
     max_dist = 10
 
     # create pandas dataframe with index for each pixel and lat, lon
-    coords_df = data.pr[0,:,:].to_dataframe().reset_index()[['lat', 'lon']]
+    coords_df = data.annual_max[0,:,:].to_dataframe().reset_index()[['lat', 'lon']]
 
     # calculate weights distance between each grid cell in miles based on radius
     pixel_weights = calc_weights(coords_df, max_dist)
 
     # go across rows to match up with dataframe of coordinates
+    data = data.annual_max.to_numpy()
 
-    test = data.pr[:,0,0].to_numpy()
-    test = np.sort(test)[-50:]
+    for i in range(data.shape[1]): # go through lats
+        for j in range(data.shape[2]): # go through lons
+            weights = pixel_weights[i+j,:] # get weights for pixel
+            weights = weights.reshape(data.shape[1], data.shape[2]) # reshape weights to 2D array
+            loc_initial = np.mean(data[:,i,j]) # initialize location parameter, mu
+            scale_initial = np.std(data[:,i,j]) # initialize scale parameter, sigma
+            shape_initial = 0.1 # initialize shape parameter, xi
+            x0 = [loc_initial, scale_initial, shape_initial] # initial vector of parameters
+            # minimize weighted log likelihood to calculate the GEV parameters for each prediction point, same parameters are used for all log likelihood values
+            res = minimize(fun=weighted_gev_nll, x0=x0, args=(data,weights), method='Nelder-Mead')
+            print(res)
+            print(genextreme.ppf(0.99, c=res.x[2], loc=res.x[0], scale=res.x[1]))
 
-    # minimize weighted log likelihood to calculate the GEV parameters for each prediction point, same parameters are used for all log likelihood values
-    loc_initial = np.mean(test) # initialize location parameter, mu
-    scale_initial = np.std(test) # initialize scale parameter, sigma
-    shape_initial = 0.1 # initialize shape parameter, xi
-    x0 = [loc_initial, scale_initial, shape_initial] # initial vector of parameters
-    res = minimize(fun=gev_nll, x0=x0, args=test, method='Nelder-Mead')
-    print(res)
+            shape, loc, scale = genextreme.fit(data[:,i,j])
+            print(loc, scale, shape)
+            print(genextreme.ppf(0.99, c=shape, loc=loc, scale=scale))
+            print(poop)
 
-    shape, loc, scale = genextreme.fit(test)
-    print(loc, scale, shape)
+
 
     # x = np.linspace(genextreme.ppf(0.01, c=2.420e-01, loc=1.843e-18, scale=2.456e-18), genextreme.ppf(0.99, c=2.420e-01, loc=1.843e-18, scale=2.456e-18), 100)
     # fig, ax = plt.subplots(1, 1)
@@ -116,13 +131,56 @@ def regional_gmle(data):
     return
 
 
-# constrain shape parameter with beta distribution
+def annual_max():
+    data_files = glob2.glob('./*clipped.nc')
+    #data_files = glob2.glob('*ba.nc')
+
+    for f in data_files:
+        print(f)
+        # open one of your files
+        ds = xr.open_dataset(f)
+        lat = ds.lat
+        lon = ds.lon
+
+        time = ds.time.dt.year
+        years = np.unique(time)
+        annual_max = []
+        for y in years:
+            # find maximum for a specific year (1990 in this example)
+            ds_ymax = ds.sel(time=slice(str(y)+'-01-01', str(y)+'-12-31')).max('time')
+
+            ds_ymax = np.array(ds_ymax.pr)
+
+            annual_max.append(ds_ymax)
+
+        annual_max = np.array(annual_max)
+
+        annual_max[annual_max < 0] = 0
+
+        dummy = ds.pr[0:len(years),:,:] # create dummy output variable
+        dummy[:] = annual_max[:]
+
+        ds['years'] = years
+
+        ds['annual_max'] = xr.DataArray(data=dummy, dims=["years","lat", "lon"], coords=[years,lat,lon])
+        vars = list(ds.keys())
+        if 'time_bnds' in vars:
+            data_out = ds.drop(labels=['time_bnds','pr','time'])
+        else:
+            data_out = ds.drop(labels=['pr','time'])
+        data_out.to_netcdf(f[:-3]+'_annual_max.nc')
+
+    return
+
+
 # use quantile delta method (how does this compare to delta method)
 # quasistationary or nonstationary method?
 
 ##############################
 
-data = xr.open_dataset('clipped.nc', engine='netcdf4')
+# annual_max()
+
+data = xr.open_dataset('clipped_annual_max.nc', engine='netcdf4')
 # print(data)
 
 regional_gmle(data)
