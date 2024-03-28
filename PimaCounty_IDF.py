@@ -40,7 +40,7 @@ def calc_disagg_factors():
 
 
 
-def gev_nll(data, x):
+def gev_nll(x, data):
     '''
     Log-likehood of GEV distribution
     '''
@@ -59,17 +59,44 @@ def gev_nll(data, x):
     if (xi==0):
         loglik = -n*np.log(sigma) - np.sum((data-mu)/sigma) - np.sum(np.exp(-((data-mu)/sigma)))
     else:
-        loglik = -n*np.log(sigma) - (1/xi+1) * np.sum(np.log(m)) - np.sum(m**(-1/xi)) # third part of equation
+        loglik = -n*np.log(sigma) - (1/xi+1) * np.sum(np.log(m)) - np.sum(m**(-1/xi))
+
+    return -(loglik) # return log-likelihood
+
+def gev_nll_array(data, x):
+    '''
+    Log-likehood of GEV distribution for the region
+    '''
+    mu = x[0] #location
+    sigma = x[1] #scale
+    xi = x[2] #shape
+    # Log-likehood equation here: https://www.mas.ncl.ac.uk/~nlf8/teaching/mas8391/background/chapter2.pdf page 22
+    n = len(data) # number of sample values
+    m = 1 + (xi * (data - mu) / sigma) # define m
+    if np.min(m) < 0.00001: # if minimum of m is close to zero or negative, return 1000000
+        return 1000000
+
+    if sigma < 0.00001: # if scale is close to zero or negative, return 1000000
+       return 1000000
+
+    if (xi==0):
+        loglik = -n*np.log(sigma) - np.sum((data-mu)/sigma) - np.sum(np.exp(-((data-mu)/sigma)))
+    else:
+        loglik = -n*np.log(sigma) - (1/xi+1) * np.sum(np.log(m)) - np.sum(m**(-1/xi))
 
     return -(loglik) # return log-likelihood
 
 def weighted_gev_nll(x, data, weights):
+    '''
+    beta distribution addition is taken from Martins and Stedinger (2000) https://repositorio.ufc.br/bitstream/riufc/59412/1/2000_art_esmartins3.pdf page 740
+    natural log of beta is subtracted from NLL because we converted NLL to positive
+    '''
     xi = x[2] #shape
     q = 5
     beta = (gamma(q+q) * (0.5 + xi)**(q-1) * (0.5 - xi)**(q-1)) / (gamma(q)*gamma(q)) # calculate beta weight for shape parameter
-    print(np.log(beta))
-    nll_grid = np.apply_along_axis(gev_nll, 0, data, x) # multiply the log-likelihood by the weights
-    return np.sum(nll_grid*weights) - beta
+
+    nll_grid = np.apply_along_axis(gev_nll_array, 0, data, x) # multiply the log-likelihood by the weights
+    return np.sum((nll_grid )*weights)
 
 def calc_weights(data, radius):
     # take in grid cell coordinates and convert to list of tuples
@@ -106,28 +133,35 @@ def regional_gmle(data):
     for i in range(data.shape[1]): # go through lats
         for j in range(data.shape[2]): # go through lons
             weights = pixel_weights[i+j,:] # get weights for pixel
+            print(weights)
+            annual_max_data = data[:29,i,j]
+
             weights = weights.reshape(data.shape[1], data.shape[2]) # reshape weights to 2D array
-            loc_initial = np.mean(data[:,i,j]) # initialize location parameter, mu
-            scale_initial = np.std(data[:,i,j]) # initialize scale parameter, sigma
-            shape_initial = 0.1 # initialize shape parameter, xi
+            loc_initial = np.mean(annual_max_data) # initialize location parameter, mu
+            scale_initial = np.std(annual_max_data) # initialize scale parameter, sigma
+            shape_initial = -0.1 # initialize shape parameter, xi
             x0 = [loc_initial, scale_initial, shape_initial] # initial vector of parameters
             # minimize weighted log likelihood to calculate the GEV parameters for each prediction point, same parameters are used for all log likelihood values
-            res = minimize(fun=weighted_gev_nll, x0=x0, args=(data,weights), method='Nelder-Mead')
+            res = minimize(fun=weighted_gev_nll, x0=x0, args=(data[:29,:,:],weights), method='Nelder-Mead')
+            loc = res.x[0]
+            scale = res.x[1]
+            shape = -res.x[2] # sign for shape parameter is switched in scipy.genextreme so need to apply negative
             print(res)
-            print(genextreme.ppf(0.99, c=res.x[2], loc=res.x[0], scale=res.x[1]))
-
-            shape, loc, scale = genextreme.fit(data[:,i,j])
-            print(loc, scale, shape)
             print(genextreme.ppf(0.99, c=shape, loc=loc, scale=scale))
-            print(poop)
+
+            # res = minimize(fun=gev_nll, x0=x0, args=annual_max_data, method='Nelder-Mead')
+            # print(res)
+            # print(genextreme.ppf(0.99, c=-res.x[2], loc=res.x[0], scale=res.x[1]))
+
+            # shape, loc, scale = genextreme.fit(annual_max_data, loc=loc_initial, scale=scale_initial)
+            # print(loc, scale, shape)
+            # print(genextreme.ppf(0.99, c=shape, loc=loc, scale=scale))
+
+            print(stop)
 
 
 
-    # x = np.linspace(genextreme.ppf(0.01, c=2.420e-01, loc=1.843e-18, scale=2.456e-18), genextreme.ppf(0.99, c=2.420e-01, loc=1.843e-18, scale=2.456e-18), 100)
-    # fig, ax = plt.subplots(1, 1)
-    # ax.plot(x, genextreme.pdf(x, c=2.420e-01, loc=1.843e-18, scale=2.456e-18), 'r-', lw=5, alpha=0.6, label='genextreme pdf')
 
-    # plt.show()
     return
 
 
@@ -181,6 +215,7 @@ def annual_max():
 # annual_max()
 
 data = xr.open_dataset('clipped_annual_max.nc', engine='netcdf4')
+
 # print(data)
 
 regional_gmle(data)
