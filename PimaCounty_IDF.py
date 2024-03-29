@@ -96,7 +96,7 @@ def weighted_gev_nll(x, data, weights):
     beta = (gamma(q+q) * (0.5 + xi)**(q-1) * (0.5 - xi)**(q-1)) / (gamma(q)*gamma(q)) # calculate beta weight for shape parameter
 
     nll_grid = np.apply_along_axis(gev_nll_array, 0, data, x) # multiply the log-likelihood by the weights
-    return np.sum((nll_grid )*weights)
+    return np.sum((nll_grid - np.log(beta) )*weights)
 
 def calc_weights(data, radius):
     # take in grid cell coordinates and convert to list of tuples
@@ -117,37 +117,54 @@ def calc_weights(data, radius):
 
     return kern_dist_norm
 
-def regional_gmle(data):
+
+
+def regional_gmle(data, start_year, end_year):
     # set radius (miles) for each prediction point
     max_dist = 10
 
     # create pandas dataframe with index for each pixel and lat, lon
     coords_df = data.annual_max[0,:,:].to_dataframe().reset_index()[['lat', 'lon']]
+    lat_len = len(data.lat)
+    lon_len = len(data.lon)
 
     # calculate weights distance between each grid cell in miles based on radius
     pixel_weights = calc_weights(coords_df, max_dist)
+    # reshape pixel weights into 3D array
+    weights_array = pixel_weights.reshape((len(pixel_weights),lat_len,lon_len))
 
-    # go across rows to match up with dataframe of coordinates
+    # extract annual max years
+    data = data.sel(years=slice(str(start_year), str(end_year)))
+    # convert data to numpy array
     data = data.annual_max.to_numpy()
 
-    for i in range(data.shape[1]): # go through lats
-        for j in range(data.shape[2]): # go through lons
-            weights = pixel_weights[i+j,:] # get weights for pixel
-            print(weights)
-            annual_max_data = data[:29,i,j]
+    gev_params = np.empty((3,lat_len,lon_len))
+    for i in range(lat_len): # go through lats
+        for j in range(lon_len): # go through lons
+            weights_pixel = pixel_weights[i+j,:] # get weights for pixel
+            annual_max_data = data[:,i,j] # get annual max data for pixel
 
-            weights = weights.reshape(data.shape[1], data.shape[2]) # reshape weights to 2D array
+            weights_array = weights_pixel.reshape(data.shape[1], data.shape[2]) # reshape weights to 2D array
             loc_initial = np.mean(annual_max_data) # initialize location parameter, mu
             scale_initial = np.std(annual_max_data) # initialize scale parameter, sigma
-            shape_initial = -0.1 # initialize shape parameter, xi
+            shape_initial = 0.1 # initialize shape parameter, xi
             x0 = [loc_initial, scale_initial, shape_initial] # initial vector of parameters
             # minimize weighted log likelihood to calculate the GEV parameters for each prediction point, same parameters are used for all log likelihood values
-            res = minimize(fun=weighted_gev_nll, x0=x0, args=(data[:29,:,:],weights), method='Nelder-Mead')
-            loc = res.x[0]
-            scale = res.x[1]
+
+            mask = (weights_array != 0) # create mask of valid pixel data based on weight values
+            data_region = data[:,mask] # mask annual max data for valid pixels
+            weights = weights_array[mask] # select valid weights
+
+            # minimize LL
+            res = minimize(fun=weighted_gev_nll, x0=x0, args=(data_region,weights), method='Nelder-Mead')
+            loc = res.x[0] # get location parameter
+            scale = res.x[1] # get scale parameter
             shape = -res.x[2] # sign for shape parameter is switched in scipy.genextreme so need to apply negative
-            print(res)
-            print(genextreme.ppf(0.99, c=shape, loc=loc, scale=scale))
+
+            # save parameters to output raster
+            gev_params[:,i,j] = (loc, scale, shape)
+            # print(res)
+            # print(genextreme.ppf(0.99, c=shape, loc=loc, scale=scale))
 
             # res = minimize(fun=gev_nll, x0=x0, args=annual_max_data, method='Nelder-Mead')
             # print(res)
@@ -157,12 +174,7 @@ def regional_gmle(data):
             # print(loc, scale, shape)
             # print(genextreme.ppf(0.99, c=shape, loc=loc, scale=scale))
 
-            print(stop)
-
-
-
-
-    return
+    return gev_params
 
 
 def annual_max():
@@ -207,15 +219,43 @@ def annual_max():
     return
 
 
+def idf_curve():
+    # annual_max()
+
+    rps = [2, 5, 10, 25, 50, 100, 500] # return periods
+    percentiles = [(1 - (1/i)) for i in rps] # percentiles for return periods
+
+    data = xr.open_dataset('clipped_annual_max.nc', engine='netcdf4')
+
+    baseline_start = 1975
+    baseline_end = 2004
+    future_start = 2025
+    future_end = 2054
+    gev_params = regional_gmle(data, baseline_start, baseline_end) # get GEV parameters with regional GMLE
+
+    idf = np.empty((len(percentiles),gev_params.shape[1],gev_params.shape[2])) # create output for IDF values
+    # loop through GEV parameters
+    for i in range(gev_params.shape[1]):
+        for j in range(gev_params.shape[2]):
+            # calculate IDF values for all percentiles
+            idf[:,i,j] = genextreme.ppf(percentiles, c=gev_params[2,i,j], loc=gev_params[0,i,j], scale=gev_params[1,i,j])
+
+    print(idf)
+
+
+    return
+
+
+def delta_method():
+
+
+    return
+
+
 # use quantile delta method (how does this compare to delta method)
 # quasistationary or nonstationary method?
 
 ##############################
 
-# annual_max()
 
-data = xr.open_dataset('clipped_annual_max.nc', engine='netcdf4')
-
-# print(data)
-
-regional_gmle(data)
+idf_curve()
