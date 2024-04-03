@@ -9,35 +9,43 @@ import matplotlib.pyplot as plt
 import glob2
 
 
-def EPC_grid():
-
-    # create grid for Eastern Pima County (EPC) based on downscaled Daymet grid
-
-    # reprojet NA14 rasters to EPC grid
-
-    return
-
 def calc_disagg_factors():
     rps = [2, 5, 10, 25, 50, 100, 500]
     hrs = [1, 2, 3, 6, 12]
 
+    na14_h_rp_disagg_array = []
+
     # loop through return periods
-    for i in rps:
+    for rp in rps:
         # read in daily NA14 raster for return period
-        na14_d_rp = rasterio.open()
+        with rasterio.open(f'sw{rp}yr24ha_ams_remapbil.nc', 'r') as r:
+            na14_d_rp = r.read(1)
 
         # loop through each subdaily amount
-        for j in hrs:
+        for hr in hrs:
             # read in hourly NA14 raster for each subdaily amount and return period
-            na14_h_rp = rasterio.open()
+            if hr == 1:
+                with rasterio.open(f'sw{rp}yr60ma_ams_remapbil.nc', 'r') as h:
+                    na14_h_rp = h.read(1)
+            else:
+                with rasterio.open(f'sw{rp}yr{hr:02d}ha_ams_remapbil.nc', 'r') as h:
+                    na14_h_rp = h.read(1)
+
             # divide subdaily NA14 raster by the daily NA14 for the corresponding return period (e.g., 2hr_100yr / 24hr_100yr)
             na14_h_rp_disagg = na14_h_rp / na14_d_rp
 
+            # stack disagg factors into 3D array
+            na14_h_rp_disagg = np.expand_dims(na14_h_rp_disagg, axis=0)
+            if len(na14_h_rp_disagg_array) == 0:
+                na14_h_rp_disagg_array = na14_h_rp_disagg
+            else:
+                na14_h_rp_disagg_array = np.append(na14_h_rp_disagg_array, na14_h_rp_disagg, axis=0)
+    
+    # mask NaNs
+    na14_h_rp_disagg_array = np.ma.masked_invalid(na14_h_rp_disagg_array)
+    
     # return disaggregation grids for each return period and subdaily level
-    return na14_h_rp_disagg
-
-
-
+    return na14_h_rp_disagg_array
 
 
 def gev_nll(x, data):
