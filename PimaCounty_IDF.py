@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import glob2
 
 
-def calc_disagg_factors():
+def calc_disagg_factors(location, na14_region):
     rps = [2, 5, 10, 25, 50, 100, 500]
     hrs = [1, 2, 3, 6, 12]
 
@@ -18,17 +18,17 @@ def calc_disagg_factors():
     # loop through return periods
     for rp in rps:
         # read in daily NA14 raster for return period
-        with rasterio.open(f'sw{rp}yr24ha_ams_remapbil.nc', 'r') as r:
+        with rasterio.open(f'{location}_{na14_region}{rp}yr24ha_ams_remapbil.nc', 'r') as r:
             na14_d_rp = r.read(1)
 
         # loop through each subdaily amount
         for hr in hrs:
             # read in hourly NA14 raster for each subdaily amount and return period
             if hr == 1:
-                with rasterio.open(f'sw{rp}yr60ma_ams_remapbil.nc', 'r') as h:
+                with rasterio.open(f'{location}_{na14_region}{rp}yr60ma_ams_remapbil.nc', 'r') as h:
                     na14_h_rp = h.read(1)
             else:
-                with rasterio.open(f'sw{rp}yr{hr:02d}ha_ams_remapbil.nc', 'r') as h:
+                with rasterio.open(f'{location}_{na14_region}{rp}yr{hr:02d}ha_ams_remapbil.nc', 'r') as h:
                     na14_h_rp = h.read(1)
 
             # divide subdaily NA14 raster by the daily NA14 for the corresponding return period (e.g., 2hr_100yr / 24hr_100yr)
@@ -265,5 +265,7 @@ def delta_method():
 
 ##############################
 
+location = 'PimaCo'
+na14_region = 'sw'
 
 idf_curve()
