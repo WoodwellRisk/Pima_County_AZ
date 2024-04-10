@@ -4,8 +4,8 @@ import numpy as np
 import codecs
 from wwrtools import netcdf_tools
 
-var = 'pfe'
-var_long = 'precipitation frequency estimates'
+var = 'pfe_uCL'  # pfe, pfe_uCL, or pfe_lCL
+var_long = 'precipitation frequency estimates upper confidence limits'
 units = 'in'
 
 rps = [2, 5, 10, 25, 50, 100, 500]
@@ -15,10 +15,17 @@ header_row_count = 6
 
 for rp in rps:
     for hr in hrs:
+        if var == 'pfe':
+            file_suffix = '_ams'
+        elif var == 'pfe_uCL':
+            file_suffix = 'u_ams'
+        elif var == 'pfe_lCL':
+            file_suffix = 'l_ams'
+
         if hr == 1:
-            na14_file = f'sw{rp}yr60ma_ams'            
+            na14_file = f'sw{rp}yr60ma{file_suffix}'            
         else:
-            na14_file = f'sw{rp}yr{hr:02d}ha_ams'
+            na14_file = f'sw{rp}yr{hr:02d}ha{file_suffix}'
             
         with codecs.open(f'C:/Users/kgassert/Downloads/{na14_file}/{na14_file}.asc', encoding='utf-8-sig') as f:
             header = np.genfromtxt(f, max_rows=header_row_count)
