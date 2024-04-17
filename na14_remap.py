@@ -14,3 +14,5 @@ for s in glob.glob(f'{na14_region}*.nc'):
 	print(f'Remapping {s}')
 	cdo.remapbil(grid_file, input=s, output=f'{location}_{s}', options='-z zip')
 
+print('done')
+i
