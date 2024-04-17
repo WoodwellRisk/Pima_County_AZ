@@ -3,7 +3,7 @@ from cdo import Cdo
 cdo = Cdo()
 cdo.debug = True
 
-location = 'PimaCo'
+location = 'EPC'
 na14_region = 'sw'
 
 # specify name of file with desired grid, to be used to remap na14 data
