@@ -13,6 +13,10 @@ from numba import jit
 
 
 def apply_disagg_factors(idf_future_daily, na14_daily, na14_subdaily):
+    '''
+    Takes in the daily and subdaily NA14 rasters and computes the future subdaily by calculating the disaggregation
+    factors between the NA14 daily and subdaily.
+    '''
 
     # divide subdaily NA14 raster by the daily NA14 for the corresponding return period (e.g., 2hr_100yr / 24hr_100yr)
     na14_subdaily_disagg = na14_subdaily.pfe / na14_daily.pfe
@@ -50,7 +54,7 @@ def gev_nll(x, data):
 @jit(nopython=True)
 def gev_nll_array(data, x):
     '''
-    Log-likehood of GEV distribution for the region
+    Log-likehood of GEV distribution for the region. Data is the annual max and x is the parameter vector.
     '''
     mu = x[0] #location
     sigma = np.exp(x[1]) #scale
@@ -71,8 +75,9 @@ def gev_nll_array(data, x):
 @jit(nopython=True)
 def weighted_gev_nll(x, data, weights):
     '''
-    beta distribution addition is taken from Martins and Stedinger (2000) https://repositorio.ufc.br/bitstream/riufc/59412/1/2000_art_esmartins3.pdf page 740
-    natural log of beta is subtracted from NLL because we converted NLL to positive
+    Function to calculate the weighted Negative Log-Likelihood for the GEV distribution. A beta distribution weight is applied to constrict the shape parameter.
+    The beta distribution addition is taken from Martins and Stedinger (2000) https://repositorio.ufc.br/bitstream/riufc/59412/1/2000_art_esmartins3.pdf page 740.
+    The natural log of beta is subtracted from NLL because we converted NLL to positive.
     '''
     xi = x[2] #shape
     q = 5
@@ -87,6 +92,11 @@ def weighted_gev_nll(x, data, weights):
 
 
 def calc_weights(point, other_points, radius):
+    '''
+    Function to calculate the triweight kernel distance function between points or grid cells. The distances are converted 
+    to weights for the weighted log-likelihood minimization.
+    '''
+    
     # create matrix of the Haversine distance in miles between all grid cells
     hav_dist = haversine_vector(point, other_points, unit=Unit.MILES, comb=True)
     # apply triweight kernel function to weights
@@ -101,6 +111,9 @@ def calc_weights(point, other_points, radius):
 
 
 def regional_gmle(i, j, lat, lon, data, coords_df, max_dist):
+    '''
+    Estimates the parameters for the GEV distribution of a pixel using a weighted negative log-likelihood approach.
+    '''
 
     annual_max_data = data[:,i,j] # get annual max data for pixel
     if np.any(np.isnan(annual_max_data)):
@@ -136,6 +149,9 @@ def regional_gmle(i, j, lat, lon, data, coords_df, max_dist):
 
 
 def idf_curve(data, baseline_start, baseline_end, future_start, future_end, model, scenario, study_area, max_dist, cpus):
+    '''
+    Calculates the GEV parameters of the baseline and future time periods of a particular climate model and scenario.
+    '''
     now_time = datetime.now()
     # create pandas dataframe with index for each pixel and lat, lon
     coords_df = data.annual_max[0,:,:].to_dataframe().reset_index()[['lat', 'lon']]
@@ -191,6 +207,9 @@ def idf_curve(data, baseline_start, baseline_end, future_start, future_end, mode
 
 
 def delta_method(gev_params_baseline, gev_params_future, rp, na14_daily):
+    '''
+    Bias-adjust the projected future daily extreme precipitation using the NA14 data as the reference dataset and the quantile delta method.
+    '''
 
     idf_baseline = np.empty((gev_params_baseline.location.shape[0],gev_params_baseline.location.shape[1])) # create output for PFE baseline values
     idf_future = np.empty((gev_params_future.location.shape[0],gev_params_future.location.shape[1])) # create output for PFE future values
@@ -215,6 +234,9 @@ def delta_method(gev_params_baseline, gev_params_future, rp, na14_daily):
     return bias_adjusted_idf_future
 
 def annual_max(data_files):
+    '''
+    Calculate the annual maxima from daily rainfall climate data.
+    '''
 
     for f in data_files:
         print(f)

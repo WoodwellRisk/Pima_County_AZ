@@ -20,6 +20,10 @@ import scipy
 
 
 def apply_disagg_factors(idf_future_daily, na14_daily, na14_subdaily):
+    '''
+    Takes in the daily and subdaily NA14 rasters and computes the future subdaily by calculating the disaggregation
+    factors between the NA14 daily and subdaily.
+    '''
 
     # divide subdaily NA14 raster by the daily NA14 for the corresponding return period (e.g., 2hr_100yr / 24hr_100yr)
     na14_subdaily_disagg = na14_subdaily.pfe / na14_daily.pfe
@@ -35,6 +39,9 @@ def apply_disagg_factors(idf_future_daily, na14_daily, na14_subdaily):
 
 
 def annual_max(data_files):
+    '''
+    Calculate the annual maxima from daily rainfall climate data.
+    '''
 
     for f in data_files:
         print(f)
@@ -77,6 +84,11 @@ def annual_max(data_files):
     return
 
 def calc_weights(point, other_points, radius):
+    '''
+    Function to calculate the triweight kernel distance function between points or grid cells. The distances are converted 
+    to weights for the weighted log-likelihood minimization.
+    '''
+    
     # create matrix of the Haversine distance in miles between all grid cells
     hav_dist = haversine_vector(point, other_points, unit=Unit.MILES, comb=True)
     # apply triweight kernel function to weights
@@ -92,7 +104,8 @@ def calc_weights(point, other_points, radius):
 @jit(nopython=True)
 def gev_nll_array(data, x, cov):
     '''
-    Log-likehood of GEV distribution for the region
+    Log-likehood of GEV distribution for the region. Data is the annual max, x is the parameter vector, and cov
+    is the temporal covariate.
     Log-likehood equation here: https://www.mas.ncl.ac.uk/~nlf8/teaching/mas8391/background/chapter2.pdf page 22
     '''
     mu0 = x[0] #location0
@@ -119,8 +132,9 @@ def gev_nll_array(data, x, cov):
 @jit(nopython=True)
 def weighted_gev_nll(x, data, weights, cov):
     '''
-    beta distribution addition is taken from Martins and Stedinger (2000) https://repositorio.ufc.br/bitstream/riufc/59412/1/2000_art_esmartins3.pdf page 740
-    natural log of beta is subtracted from NLL because we converted NLL to positive
+    Function to calculate the weighted Negative Log-Likelihood for the GEV distribution. A beta distribution weight is applied to constrict the shape parameter.
+    The beta distribution addition is taken from Martins and Stedinger (2000) https://repositorio.ufc.br/bitstream/riufc/59412/1/2000_art_esmartins3.pdf page 740.
+    The natural log of beta is subtracted from NLL because we converted NLL to positive.
     '''
     xi = x[4] #shape
     q = 5
@@ -135,6 +149,10 @@ def weighted_gev_nll(x, data, weights, cov):
 
 
 def regional_gmle(i, j, lat, lon, data, coords_df, max_dist, cov, qs_param, round):
+    '''
+    Estimates the parameters for the GEV distribution of a pixel using a weighted negative log-likelihood approach. 
+    Two rounds of fitting are completed to ensure the global minima is found.
+    '''
 
     annual_max_data = data[:,i,j] # get annual max data for pixel
     if np.any(np.isnan(annual_max_data)):
@@ -179,14 +197,20 @@ def regional_gmle(i, j, lat, lon, data, coords_df, max_dist, cov, qs_param, roun
 
 
 def anomoly(grid, radius):
-    mean = scipy.ndimage.generic_filter(grid, np.mean, size=radius)
-    std = scipy.ndimage.generic_filter(grid, np.std, size=radius)
-    dif = np.abs((grid - mean)) > (std * 0.5)
+    '''
+    Function to figure out which pixels need to be re-optimized in the minimization.
+    '''
+    mean = scipy.ndimage.generic_filter(grid, np.mean, size=radius) #calculate mean within a radius
+    std = scipy.ndimage.generic_filter(grid, np.std, size=radius) #calculate standard deviation within a radius
+    dif = np.abs((grid - mean)) > (std * 0.5) ## determine which pixels fall outside half the standard deviation plus the mean
 
     return dif
 
 
 def idf_curve(data, year_start, year_end, model, scenario, study_area, max_dist, cpus, cov, qs_param):
+    '''
+    Calculates the GEV parameters of the baseline and future time periods of a particular climate model and scenario.
+    '''
     now_time = datetime.now()
 
     # create pandas dataframe with index for each pixel and lat, lon
@@ -268,6 +292,9 @@ def idf_curve(data, year_start, year_end, model, scenario, study_area, max_dist,
 
 
 def delta_method(gev_params, baseline_year, future_year, rp, na14_daily, erf):
+    '''
+    Bias-adjust the projected future daily extreme precipitation using the NA14 data as the reference dataset and the quantile delta method.
+    '''
 
     idf_base = np.empty((gev_params.location0.shape[0],gev_params.location0.shape[1])) # create output for IDF baseline values
     idf_future = np.empty((gev_params.location0.shape[0],gev_params.location0.shape[1])) # create output for IDF future values
