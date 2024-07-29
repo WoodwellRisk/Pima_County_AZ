@@ -1,7 +1,6 @@
-
 import numpy as np
-from haversine import haversine_vector, Unit #, haversine
-from scipy.optimize import minimize, basinhopping, shgo, direct, differential_evolution, dual_annealing, fsolve #, show_options
+from haversine import haversine_vector, Unit
+from scipy.optimize import minimize, basinhopping, shgo, direct, differential_evolution, dual_annealing, fsolve
 import xarray as xr
 from scipy.stats import genextreme
 import glob2

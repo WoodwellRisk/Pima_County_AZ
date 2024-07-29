@@ -1,6 +1,6 @@
 import numpy as np
-from haversine import haversine_vector, Unit #, haversine
-from scipy.optimize import minimize #, show_options
+from haversine import haversine_vector, Unit
+from scipy.optimize import minimize
 from math import gamma
 import xarray as xr
 from scipy.stats import genextreme
@@ -289,7 +289,6 @@ if __name__ == "__main__":
     study_area = 'EPC'
 
     annual_max_files = glob2.glob(f'./annual_max/{study_area}*{scenario}*.nc')
-#    annual_max_files = glob2.glob(f'./annual_max/{study_area}_pr_M*_{scenario}*.nc')
 
     count = 1
     for f in annual_max_files:
